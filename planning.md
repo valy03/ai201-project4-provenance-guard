@@ -106,26 +106,30 @@ blind spots don't overlap.
 
 ## 3. Transparency Label Design (exact text)
 
-Confidence is shown as a **percentage** and reinforced in plain language so a
-non-technical reader understands what it means. `{pct}` = `round(confidence*100)`.
+Confidence is shown as a **percentage** and a qualitative **tier word** so a
+non-technical reader understands what it means, and so the label text genuinely
+changes with the score (never over-claiming). `{pct}` = `round(confidence*100)`;
+`{tier}` = high (≥0.60) / moderate (≥0.30) / low (<0.30).
 
-**High-confidence AI:**
-> ⚠️ **Likely AI-generated.** Our analysis indicates this text was most likely
-> produced by an AI system (confidence: **{pct}%**). Two independent checks agreed.
-> If you created this and believe the result is wrong, you can appeal it.
+**AI variant** (label_class = `ai`):
+> ⚠️ Likely AI-generated ({tier} confidence: {pct}%). Our automated analysis
+> indicates this text was most likely produced by an AI system. If you created this
+> yourself and believe the result is wrong, you can appeal it for human review.
 
-**High-confidence human:**
-> ✅ **Likely human-written.** Our analysis found no strong signs of AI generation
-> in this text (confidence: **{pct}%**). Two independent checks agreed.
+**Human variant** (label_class = `human`):
+> ✅ Likely human-written ({tier} confidence: {pct}%). Our automated analysis found
+> no strong signs of AI generation in this text.
 
-**Uncertain:**
-> ❓ **Attribution uncertain.** Our two checks disagreed or were inconclusive, so we
-> can't reliably say whether a person or an AI wrote this (confidence in a firm call:
-> **{pct}%**). We've labeled it *uncertain* rather than guess. If you're the creator,
-> you can appeal to have it reviewed.
+**Uncertain variant** (label_class = `uncertain`):
+> ❓ Attribution uncertain (confidence in a firm call: {pct}%). Our two checks
+> disagreed or were inconclusive, so we can't reliably say whether a person or an AI
+> wrote this. We've labeled it uncertain rather than guess. If you're the creator,
+> you can appeal for human review.
 
 The uncertain variant is deliberately the safe default: the design's failure mode is
-"admit uncertainty," never "confidently accuse."
+"admit uncertainty," never "confidently accuse." The tier word keeps the AI/human
+variants honest — a label_class of `ai` at 27% confidence reads "low confidence, 27%"
+rather than implying certainty.
 
 ---
 
