@@ -51,11 +51,15 @@ blind spots don't overlap.
 
 ### Combining them → one confidence score
 
-- Weighted fusion of the AI-likelihood: `S = 0.4 · p_ai_style + 0.6 · p_ai_llm`
-  (LLM weighted higher as the stronger semantic signal; tunable in M4).
+- Weighted fusion of the AI-likelihood: `S = 0.25 · p_ai_style + 0.75 · p_ai_llm`.
+  The LLM drives the magnitude because it is the stronger semantic judge; the
+  stylometric signal is a lightweight corroborator. (Started at 0.4/0.6 in the M2
+  spec; **tuned to 0.25/0.75 in M4** — see §2 and the M4 tuning note.)
 - **Disagreement penalty:** `d = |p_ai_style − p_ai_llm|`. Large `d` means the two
   independent views conflict, so we *lower* confidence and bias toward `uncertain`.
-  The system is only allowed to be confident when both signals agree.
+  Stylometry's main job is this **veto**: when it strongly disagrees with the LLM
+  (e.g. formal human writing the LLM wrongly flags), `d` is large and the result is
+  forced to `uncertain`. The system is only confident when both signals agree.
 
 ---
 
@@ -68,22 +72,35 @@ blind spots don't overlap.
   disagree. The label must communicate "leaning, not certain." By contrast 0.95
   means both signals strongly agreed. A 0.51 and a 0.95 therefore land in different
   bands and produce different label text (this is the meaningfulness test in M4).
-- **Mapping raw outputs → calibrated score:**
+- **Mapping raw outputs → calibrated score (unified formula):**
   1. Each signal already returns `[0,1]`.
-  2. Fuse: `S = 0.4·p_ai_style + 0.6·p_ai_llm`.
-  3. Apply disagreement penalty: if `d ≥ 0.4`, force `label_class = uncertain`
-     regardless of S, and set `confidence = 0.5 − (something small)` range.
-  4. Otherwise band S (below) and set confidence = distance from the neutral 0.5,
-     rescaled: `confidence = |S − 0.5| · 2` clamped to `[0,1]`, so scores near 0.5
-     yield low confidence and scores near 0 or 1 yield high confidence.
-- **Thresholds (bands):**
+  2. Fuse: `S = 0.25·p_ai_style + 0.75·p_ai_llm`.
+  3. Measure disagreement: `d = |p_ai_style − p_ai_llm|`.
+  4. **One confidence definition for every band:**
+     - `distance  = |S − 0.5| · 2` — how far the fused score is from neutral (0 at
+       S=0.5, 1 at the extremes).
+     - `agreement = 1 − d` — how much the two signals agree (1 = identical, 0 =
+       maximal conflict).
+     - **`confidence = distance · agreement`**, clamped to `[0,1]`.
 
-  | Fused score S        | Label class | Confidence source |
-  |----------------------|-------------|-------------------|
-  | `S ≥ 0.70`           | **ai**      | `S`               |
-  | `S ≤ 0.30`           | **human**   | `1 − S`           |
-  | `0.30 < S < 0.70`    | **uncertain** | `1 − |S−0.5|·2`  |
-  | any `d ≥ 0.40`       | **uncertain** (override) | low |
+     Confidence is high **only** when the fused score is decisive *and* the two
+     signals agree; either being weak drags it down. That is what makes the number
+     reflect genuine uncertainty — a 0.51 (near neutral, or with disagreeing
+     signals) and a 0.95 (decisive + agreeing) land in different bands and produce
+     different label text (the meaningfulness test).
+- **Thresholds (bands)** — label class is chosen from S and d; confidence always
+  comes from the unified formula above:
+
+  | Condition                       | Label class              |
+  |---------------------------------|--------------------------|
+  | `d ≥ 0.40` (signals disagree)   | **uncertain** (override) |
+  | else `S ≥ 0.70`                 | **ai**                   |
+  | else `S ≤ 0.30`                 | **human**                |
+  | else `0.30 < S < 0.70`          | **uncertain**            |
+
+  The disagreement override is checked first: even a decisive-looking S is labeled
+  *uncertain* when the signals conflict (the false-positive safeguard in §3), and
+  confidence there is naturally low because `agreement` is small.
 
 ---
 
@@ -301,7 +318,21 @@ paste in as context, what to ask for, and how to verify the output before moving
 
 ---
 
-## Milestone 2 scoring note (implementation-ready)
-Fusion `S = 0.4·p_ai_style + 0.6·p_ai_llm`; disagreement `d = |Δ|`, `d ≥ 0.4` forces
-`uncertain`. Bands: `S≥0.70`→ai, `S≤0.30`→human, else uncertain. Weights/thresholds
-are tunable in M4 against the sample set.
+## Scoring note (implementation-ready)
+Fusion `S = 0.25·p_ai_style + 0.75·p_ai_llm`; disagreement `d = |Δ|`, `d ≥ 0.4`
+forces `uncertain`. Bands: `S≥0.70`→ai, `S≤0.30`→human, else uncertain.
+Confidence `= |S−0.5|·2 · (1−d)`.
+
+### M4 tuning note (why 0.25/0.75)
+The M2 spec started at 0.4/0.6. Tested against the four calibration inputs, the
+stylometric signal proved conservative — it rarely emits high AI-magnitudes even for
+clearly-AI text (that text often has naturally varied sentence lengths). At 0.4/0.6,
+clearly-AI text fused to S≈0.66 and mislabeled as *uncertain*. Reweighting to
+**0.25/0.75** lets the more-reliable LLM drive the magnitude while stylometry's real
+value — the **disagreement veto** — is preserved: formal human writing the LLM
+wrongly scores 0.8 is still rescued to *uncertain* because stylometry (≈0.23)
+disagrees (`d≈0.57 ≥ 0.4`). Verified across all four inputs plus the §3 poet
+false-positive scenario; all land on the intuitively-correct label.
+
+Degraded mode: if the Groq API is unavailable, the scorer falls back to stylometry
+alone and caps confidence at 0.60 to reflect the reduced reliability of one signal.

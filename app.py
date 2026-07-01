@@ -11,7 +11,8 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 
 import audit_log
-from detection import stylometric_signal
+from detection import llm_signal, stylometric_signal
+from scoring import score
 
 load_dotenv()
 
@@ -40,23 +41,36 @@ def submit():
 
     content_id = "c_" + uuid.uuid4().hex[:10]
 
-    # --- Signal 1: stylometric ------------------------------------------------
+    # --- Signal 1: stylometric (local) ----------------------------------------
     style = stylometric_signal(text)
+    # --- Signal 2: LLM-as-judge (Groq) ----------------------------------------
+    llm = llm_signal(text)
+    # --- Fuse into a calibrated confidence + label class ----------------------
+    result = score(style["p_ai"], llm["p_ai"], llm["available"])
 
-    # --- Placeholders (real fusion + label arrive in M4/M5) -------------------
-    confidence = None
-    label_class = "pending"
-    label_text = "Analysis in progress — second signal and confidence scoring " \
-                 "are added in Milestone 4."
+    # Label text is still a placeholder — the three transparency variants arrive
+    # in Milestone 5. The label CLASS and confidence are now real.
+    label_class = result["label_class"]
+    confidence = result["confidence"]
+    label_text = f"[M5 placeholder] class={label_class} confidence={confidence}"
 
-    # --- Audit log ------------------------------------------------------------
+    signals = {"stylometric": style, "llm": llm}
+
+    # --- Audit log (records both signals + combined result) -------------------
     audit_log.append({
         "kind": "decision",
         "content_id": content_id,
         "creator_id": creator_id,
         "attribution": label_class,
+        "score": result["score"],
         "confidence": confidence,
-        "signals": {"stylometric": style},
+        "disagreement": result["disagreement"],
+        "degraded": result["degraded"],
+        "signals": {
+            "stylometric_p_ai": style["p_ai"],
+            "llm_p_ai": llm["p_ai"],
+            "llm_available": llm["available"],
+        },
         "status": "classified",
     })
 
@@ -65,9 +79,9 @@ def submit():
         "creator_id": creator_id,
         "label_class": label_class,
         "confidence": confidence,
-        "score": style["p_ai"],
+        "score": result["score"],
         "label_text": label_text,
-        "signals": {"stylometric": style},
+        "signals": signals,
         "status": "classified",
     })
 
